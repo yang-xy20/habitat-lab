@@ -10,6 +10,7 @@ from multiprocessing.connection import Connection
 from multiprocessing.context import BaseContext
 from queue import Queue
 from threading import Thread
+
 from typing import (
     Any,
     Callable,
@@ -62,6 +63,7 @@ CURRENT_EPISODE_NAME = "current_episode"
 NUMBER_OF_EPISODE_NAME = "number_of_episodes"
 ACTION_SPACE_NAME = "action_space"
 OBSERVATION_SPACE_NAME = "observation_space"
+SHARE_OBSERVATION_SPACE_NAME = "share_observation_space"
 
 
 def _make_env_fn(
@@ -194,8 +196,14 @@ class VectorEnv:
             read_fn() for read_fn in self._connection_read_fns
         ]
         for write_fn in self._connection_write_fns:
+            write_fn((CALL_COMMAND, (SHARE_OBSERVATION_SPACE_NAME, None)))
+        self.share_observation_space = [
+            read_fn() for read_fn in self._connection_read_fns
+        ]
+        
+        for write_fn in self._connection_write_fns:
             write_fn((CALL_COMMAND, (ACTION_SPACE_NAME, None)))
-        self.action_spaces = [
+        self.action_space = [
             read_fn() for read_fn in self._connection_read_fns
         ]
         for write_fn in self._connection_write_fns:
@@ -259,8 +267,8 @@ class VectorEnv:
                         raise NotImplementedError
 
                 elif command == RESET_COMMAND:
-                    observations = env.reset()
-                    connection_write_fn(observations)
+                    observations, info = env.reset()
+                    connection_write_fn((observations, info))
 
                 elif command == RENDER_COMMAND:
                     connection_write_fn(env.render(*data[0], **data[1]))

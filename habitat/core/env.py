@@ -7,7 +7,7 @@
 import random
 import time
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union, cast
-
+import random
 import gym
 import numba
 import numpy as np
@@ -72,6 +72,7 @@ class Env:
             "environment, use config.freeze()."
         )
         self._config = config
+        self.num_agents = config.SIMULATOR.NUM_AGENTS
         self._dataset = dataset
         self._current_episode_index = None
         if self._dataset is None and config.DATASET.TYPE:
@@ -94,6 +95,7 @@ class Env:
         )
 
         # load the first scene if dataset is present
+        
         if self._dataset:
             assert (
                 len(self._dataset.episodes) > 0
@@ -125,10 +127,41 @@ class Env:
         self._max_episode_seconds = (
             self._config.ENVIRONMENT.MAX_EPISODE_SECONDS
         )
-        self._max_episode_steps = self._config.ENVIRONMENT.MAX_EPISODE_STEPS
+        self._max_episode_steps = self._config.ENVIRONMENT.MAX_EPISODE_STEPS * self._config.SIMULATOR.NUM_AGENTS
         self._elapsed_steps = 0
         self._episode_start_time: Optional[float] = None
         self._episode_over = False
+
+    def generate_state(self):
+        generate_success = False
+        while not generate_success:
+            state = random.sample(self.episodes, self.num_agents)
+            start_position = []
+            start_rotation = []
+            start_y = []
+            for agent_id in range(self.num_agents):
+                start_position.append(state[agent_id].start_position)
+                start_y.append(state[agent_id].start_position[1])
+                start_rotation.append(state[agent_id].start_rotation)
+            generate_success = True
+            if len(np.unique(start_y)) == 1:
+                generate_success = True
+                if not self._config.SIMULATOR.USE_FULL_RAND_STATE:
+                    for i in range(self.num_agents):
+                        x1 = -start_position[i][2]
+                        y1 = -start_position[i][0]
+                        for j in range(self.num_agents-i-1):
+                            x2 = -start_position[i+j+1][2]
+                            y2 = -start_position[i+j+1][0]
+                            if pu.get_l2_distance(x1, x2, y1, y2)<2:
+                                pass
+                            else:
+                                generate_success = False
+                                break
+                        if generate_success == False:
+                            break
+
+        return start_position, start_rotation
 
     @property
     def current_episode(self) -> Episode:
@@ -202,7 +235,7 @@ class Env:
         self._elapsed_steps = 0
         self._episode_over = False
 
-    def reset(self) -> Observations:
+    def reset(self, agent_id) -> Observations:
         r"""Resets the environments and returns the initial observations.
 
         :return: initial observations from the environment.
@@ -219,12 +252,13 @@ class Env:
         self._current_episode = next(self._episode_iterator)
         self.reconfigure(self._config)
 
-        observations = self.task.reset(episode=self.current_episode)
+        observations = self.task.reset(episode=self.current_episode, agent_id = agent_id)
         self._task.measurements.reset_measures(
             episode=self.current_episode, task=self.task
         )
 
         return observations
+
 
     def _update_step_stats(self) -> None:
         self._elapsed_steps += 1
@@ -238,7 +272,7 @@ class Env:
             self.episode_iterator.step_taken()
 
     def step(
-        self, action: Union[int, str, Dict[str, Any]], **kwargs
+        self, action: Union[List[int], List[str], List[Dict[str, Any]]], **kwargs
     ) -> Observations:
         r"""Perform an action in the environment and return observations.
 
@@ -256,13 +290,14 @@ class Env:
         assert (
             self._episode_over is False
         ), "Episode over, call reset before calling step"
-
         # Support simpler interface as well
-        if isinstance(action, (str, int, np.integer)):
-            action = {"action": action}
+        
+        for i in range(self.num_agents):
+            if isinstance(action[i], (str, int, np.integer)):
+                action[i] = {"action": action[i]}
 
         observations = self.task.step(
-            action=action, episode=self.current_episode
+         action=action, episode=self.current_episode
         )
 
         self._task.measurements.update_measures(
@@ -290,8 +325,16 @@ class Env:
         self._config = config
 
         self._config.defrost()
+
+        if self._config.SIMULATOR.USE_FIXED_START_POS:
+            start_position = self.fixed_start_position[self.load_num]
+            start_rotation = self.fixed_start_rotation[self.load_num]
+            self.load_num += 1
+        else:
+            start_position, start_rotation = self.generate_state()
+
         self._config.SIMULATOR = self._task.overwrite_sim_config(
-            self._config.SIMULATOR, self.current_episode
+            self._config.SIMULATOR, self.current_episode, start_position, start_rotation
         )
         self._config.freeze()
 
@@ -356,8 +399,8 @@ class RLEnv(gym.Env):
         return self._env.current_episode
 
     @profiling_wrapper.RangeContext("RLEnv.reset")
-    def reset(self) -> Observations:
-        return self._env.reset()
+    def reset(self, agent_id) -> Observations:
+        return self._env.reset(agent_id)
 
     def get_reward_range(self):
         r"""Get min, max range of reward.

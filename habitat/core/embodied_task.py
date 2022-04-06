@@ -231,7 +231,7 @@ class EmbodiedTask:
         self._config = config
         self._sim = sim
         self._dataset = dataset
-
+        self.num_agents = config.NUM_AGENTS
         self.measurements = Measurements(
             self._init_entities(
                 entity_names=config.MEASUREMENTS,
@@ -253,8 +253,9 @@ class EmbodiedTask:
             register_func=registry.get_task_action,
             entities_config=self._config.ACTIONS,
         )
+        
         self._action_keys = list(self.actions.keys())
-
+        
     def _init_entities(
         self, entity_names, register_func, entities_config=None
     ) -> OrderedDict:
@@ -265,6 +266,7 @@ class EmbodiedTask:
         for entity_name in entity_names:
             entity_cfg = getattr(entities_config, entity_name)
             entity_type = register_func(entity_cfg.TYPE)
+            
             assert (
                 entity_type is not None
             ), f"invalid {entity_name} type {entity_cfg.TYPE}"
@@ -276,43 +278,52 @@ class EmbodiedTask:
             )
         return entities
 
-    def reset(self, episode: Episode):
-        observations = self._sim.reset()
-        observations.update(
-            self.sensor_suite.get_observations(
-                observations=observations, episode=episode, task=self
+    def reset(self, episode: Episode, agent_id: Any):
+        observations = self._sim.reset(agent_id)
+        for i in range(len(agent_id)):
+            observations[i].update(
+                self.sensor_suite.get_observations(
+                    observations=observations[i], episode=episode, task=self
+                )
             )
-        )
 
         for action_instance in self.actions.values():
             action_instance.reset(episode=episode, task=self)
 
         return observations
 
-    def step(self, action: Dict[str, Any], episode: Episode):
-        if "action_args" not in action or action["action_args"] is None:
-            action["action_args"] = {}
-        action_name = action["action"]
-        if isinstance(action_name, (int, np.integer)):
-            action_name = self.get_action_name(action_name)
-        assert (
-            action_name in self.actions
-        ), f"Can't find '{action_name}' action in {self.actions.keys()}."
-
-        task_action = self.actions[action_name]
-        observations = task_action.step(**action["action_args"], task=self)
-        observations.update(
-            self.sensor_suite.get_observations(
-                observations=observations,
-                episode=episode,
-                action=action,
-                task=self,
+    def step(self, action: List[Dict[str, Any]], episode: Episode):
+        
+        all_actions=dict()
+        
+        for i in range(self.num_agents):
+            if "action_args" not in action[i] or action[i]["action_args"] is None:
+                action[i]["action_args"] = {}
+            action_name = action[i]["action"]
+            
+            if isinstance(action_name, (int, np.integer)):
+                action_name = self.get_action_name(action_name)
+            assert (
+                action_name in self.actions
+            ), f"Can't find '{action_name}' action in {self.actions.keys()}."
+            
+            task_action = self.actions[action_name]
+            
+            all_actions[i]=task_action.step(**action[i]["action_args"], task=self)
+            
+        observations =  self._sim.step(all_actions)
+        for i in range(self.num_agents):
+            observations[i].update(
+                self.sensor_suite.get_observations(
+                    observations=observations[i],
+                    episode=episode,
+                    action=action[i],
+                    task=self,
+                )
             )
-        )
-
-        self._is_episode_active = self._check_episode_is_active(
-            observations=observations, action=action, episode=episode
-        )
+            self._is_episode_active = self._check_episode_is_active(
+                observations=observations[i], action=action[i], episode=episode
+            )
 
         return observations
 

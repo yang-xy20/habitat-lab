@@ -73,7 +73,7 @@ class HabitatSimActionsSingleton(metaclass=Singleton):
 
         return name in self._known_actions
 
-    def __getattr__(self, name):
+    def __getattr__(self, name):    
         return self._known_actions[name]
 
     def __getitem__(self, name):

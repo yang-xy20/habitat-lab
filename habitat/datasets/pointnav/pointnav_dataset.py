@@ -17,9 +17,10 @@ from habitat.tasks.nav.nav import (
     NavigationGoal,
     ShortestPathPoint,
 )
+import onpolicy
 
 CONTENT_SCENES_PATH_FIELD = "content_scenes_path"
-DEFAULT_SCENE_PATH_PREFIX = "data/scene_datasets/"
+DEFAULT_SCENE_PATH_PREFIX = onpolicy.__path__[0] + "/envs/habitat/data/scene_datasets/"
 
 
 @registry.register_dataset(name="PointNav-v1")

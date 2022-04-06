@@ -1,8 +1,8 @@
 ENVIRONMENT:
   MAX_EPISODE_STEPS: 500
 SIMULATOR:
-  AGENT_0:
-    SENSORS: ['RGB_SENSOR']
+  AGENT:
+    SENSORS: ['RGB_SENSOR', 'DEPTH_SENSOR']
   HABITAT_SIM_V0:
     GPU_DEVICE_ID: 0
   RGB_SENSOR:
@@ -21,6 +21,8 @@ TASK:
     DIMENSIONALITY: 2
   GOAL_SENSOR_UUID: pointgoal_with_gps_compass
 
-  MEASUREMENTS: ['DISTANCE_TO_GOAL', 'SUCCESS', 'SPL']
-  SUCCESS:
-    SUCCESS_DISTANCE: 0.2
+DATASET:
+  TYPE: PointNav-v1
+  SPLIT: val
+  DATA_PATH: /home/nfs_data/yangxy/onpolicy/onpolicy/envs/habitat/data/datasets/mp3d/{split}/{split}.json.gz
+  

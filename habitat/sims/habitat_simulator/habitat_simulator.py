@@ -14,12 +14,15 @@ from typing import (
     Set,
     Union,
     cast,
+    MutableMapping,
 )
 
 import numpy as np
 from gym import spaces
 from gym.spaces.box import Box
 from numpy import ndarray
+from habitat_sim import utils
+import random
 
 if TYPE_CHECKING:
     from torch import Tensor
@@ -275,6 +278,7 @@ class HabitatSim(habitat_sim.Simulator, Simulator):
                     "normalize_depth",
                     "type",
                     "width",
+                    "angle",
                 },
             )
             sim_sensor_cfg.uuid = sensor.uuid
@@ -282,6 +286,8 @@ class HabitatSim(habitat_sim.Simulator, Simulator):
                 sensor.observation_space.shape[:2]
             )
             sim_sensor_cfg.parameters["hfov"] = str(sensor.config.HFOV)
+            sim_sensor_cfg.position = sensor.config.POSITION
+            sim_sensor_cfg.orientation = sensor.config.ORIENTATION
 
             # TODO(maksymets): Add configure method to Sensor API to avoid
             # accessing child attributes through parent interface
@@ -298,7 +304,11 @@ class HabitatSim(habitat_sim.Simulator, Simulator):
             self.habitat_config.ACTION_SPACE_CONFIG
         )(self.habitat_config).get()
 
-        return habitat_sim.Configuration(sim_config, [agent_config])
+        agents_config = []
+        for i in range(self.habitat_config.NUM_AGENTS):
+            agents_config.append(agent_config)
+
+        return habitat_sim.Configuration(sim_config, agents_config)
 
     @property
     def sensor_suite(self) -> SensorSuite:
@@ -310,30 +320,38 @@ class HabitatSim(habitat_sim.Simulator, Simulator):
 
     def _update_agents_state(self) -> bool:
         is_updated = False
-        for agent_id, _ in enumerate(self.habitat_config.AGENTS):
-            agent_cfg = self._get_agent_config(agent_id)
+        for agent_id in range(self.habitat_config.NUM_AGENTS):
+            agent_cfg = self._get_agent_config()
+            
             if agent_cfg.IS_SET_START_STATE:
                 self.set_agent_state(
-                    agent_cfg.START_POSITION,
-                    agent_cfg.START_ROTATION,
+                    agent_cfg.START_POSITION[agent_id],
+                    agent_cfg.START_ROTATION[agent_id],
                     agent_id,
+                    self.habitat_config.NUM_AGENTS
                 )
                 is_updated = True
 
         return is_updated
 
-    def reset(self) -> Observations:
-        sim_obs = super().reset()
+    def reset(self, agent_id) -> Observations:
+        sim_obs = super().reset(agent_id)
         if self._update_agents_state():
-            sim_obs = self.get_sensor_observations()
+            sim_obs = self.get_sensor_observations(agent_id)
 
         self._prev_sim_obs = sim_obs
-        return self._sensor_suite.get_observations(sim_obs)
+        
+        return [
+            self._sensor_suite.get_observations(sim_obs[i])
+            for i in range(len(self.sim_config.agents))
+        ]
 
-    def step(self, action: Union[str, int]) -> Observations:
+    def step(self, action: Union[str, int, MutableMapping[int, Union[str, int]]]) -> Observations:
         sim_obs = super().step(action)
         self._prev_sim_obs = sim_obs
-        observations = self._sensor_suite.get_observations(sim_obs)
+        observations=[]
+        for i in range(self.habitat_config.NUM_AGENTS):
+            observations.append(self._sensor_suite.get_observations(sim_obs[i]))
         return observations
 
     def render(self, mode: str = "rgb") -> Any:
@@ -469,24 +487,19 @@ class HabitatSim(habitat_sim.Simulator, Simulator):
         """
         return self.semantic_scene
 
-    def _get_agent_config(self, agent_id: Optional[int] = None) -> Any:
-        if agent_id is None:
-            agent_id = self.habitat_config.DEFAULT_AGENT_ID
-        agent_name = self.habitat_config.AGENTS[agent_id]
-        agent_config = getattr(self.habitat_config, agent_name)
+    def _get_agent_config(self) -> Any:
+        agent_config = getattr(self.habitat_config, 'AGENT')
         return agent_config
 
     def get_agent_state(self, agent_id: int = 0) -> habitat_sim.AgentState:
-        assert agent_id == 0, "No support of multi agent in {} yet.".format(
-            self.__class__.__name__
-        )
         return self.get_agent(agent_id).get_state()
-
+        
     def set_agent_state(
         self,
         position: List[float],
         rotation: List[float],
         agent_id: int = 0,
+        num_agents: int = 2,
         reset_sensors: bool = True,
     ) -> bool:
         r"""Sets agent state similar to initialize_agent, but without agents
@@ -506,10 +519,31 @@ class HabitatSim(habitat_sim.Simulator, Simulator):
             True if the set was successful else moves the agent back to its
             original pose and returns false.
         """
+
         agent = self.get_agent(agent_id)
+        #original_state = self.get_agent_state(agent_id)
         new_state = self.get_agent_state(agent_id)
         new_state.position = position
         new_state.rotation = rotation
+        
+        if not self.habitat_config.USE_FIXED_START_POS:
+            if not self.habitat_config.USE_DIFFERENT_START_POS and not self.habitat_config.USE_SAME_ROTATION: # 180
+                new_rotation = utils.quat_from_coeffs(rotation)
+                new_angle_rotation = utils.quat_to_angle_axis(new_rotation)
+                
+                if new_angle_rotation[0] + (2*np.pi/num_agents)*agent_id > 2*np.pi:  
+                    new_state.rotation = utils.quat_from_angle_axis(new_angle_rotation[0]+(2*np.pi/num_agents)*agent_id-2*np.pi, new_angle_rotation[1])
+                else:
+                    new_state.rotation = utils.quat_from_angle_axis(new_angle_rotation[0]+(2*np.pi/num_agents)*agent_id, new_angle_rotation[1])
+            
+            if self.habitat_config.USE_RANDOM_ROTATION:
+                new_rotation = utils.quat_from_coeffs(rotation)
+                new_angle_rotation = utils.quat_to_angle_axis(new_rotation)
+
+                if new_angle_rotation[0] + random.random()*2*np.pi > 2*np.pi:  
+                    new_state.rotation = utils.quat_from_angle_axis(new_angle_rotation[0] + random.random()*2*np.pi - 2*np.pi, new_angle_rotation[1])
+                else:
+                    new_state.rotation = utils.quat_from_angle_axis(new_angle_rotation[0] + random.random()*2*np.pi, new_angle_rotation[1])
 
         # NB: The agent state also contains the sensor states in _absolute_
         # coordinates. In order to set the agent's body to a specific
@@ -531,7 +565,7 @@ class HabitatSim(habitat_sim.Simulator, Simulator):
             success = True
         else:
             success = self.set_agent_state(
-                position, rotation, reset_sensors=False
+                position, rotation, num_agents=self.habitat_config.NUM_AGENTS , reset_sensors=False
             )
 
         if success:
@@ -544,6 +578,7 @@ class HabitatSim(habitat_sim.Simulator, Simulator):
                 self.set_agent_state(
                     current_state.position,
                     current_state.rotation,
+                    num_agents = self.habitat_config.NUM_AGENTS,
                     reset_sensors=False,
                 )
             return observations
