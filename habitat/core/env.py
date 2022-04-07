@@ -12,7 +12,7 @@ import gym
 import numba
 import numpy as np
 from gym import spaces
-
+import json
 from habitat.config import Config
 from habitat.core.dataset import Dataset, Episode, EpisodeIterator
 from habitat.core.embodied_task import EmbodiedTask, Metrics
@@ -131,6 +131,24 @@ class Env:
         self._elapsed_steps = 0
         self._episode_start_time: Optional[float] = None
         self._episode_over = False
+
+        # for fixed start pos
+        if self._config.SIMULATOR.USE_FIXED_START_POS:
+            self.fixed_start_position = []
+            self.fixed_start_rotation = []
+            if "replica" in self._config.SIMULATOR.SCENE:
+                scene_id = self._config.SIMULATOR.SCENE.split("/")[-3]
+            else:
+                scene_id = self._config.SIMULATOR.SCENE.split("/")[-1].split(".")[0]
+            filepath = self._config.SIMULATOR.FIXED_MODEL_PATH + scene_id + "/{}agents/start_position.json".format(self.num_agents)
+            with open(filepath,'r',encoding='utf-8') as json_file:
+                self.fixed_start_position = json.load(json_file)
+
+            filepath = self._config.SIMULATOR.FIXED_MODEL_PATH + scene_id +"/{}agents/start_rotation.json".format(self.num_agents)
+            with open(filepath,'r',encoding='utf-8') as json_file:
+                self.fixed_start_rotation = json.load(json_file)
+            
+            self.load_num = 0
 
     def generate_state(self):
         generate_success = False

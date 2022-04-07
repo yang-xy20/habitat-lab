@@ -21,7 +21,7 @@ import onpolicy
 
 CONTENT_SCENES_PATH_FIELD = "content_scenes_path"
 DEFAULT_SCENE_PATH_PREFIX = onpolicy.__path__[0] + "/envs/habitat/data/scene_datasets/"
-
+   
 
 @registry.register_dataset(name="PointNav-v1")
 class PointNavDatasetV1(Dataset):
@@ -130,12 +130,14 @@ class PointNavDatasetV1(Dataset):
 
         for episode in deserialized["episodes"]:
             episode = NavigationEpisode(**episode)
-
+            
             if scenes_dir is not None:
                 if episode.scene_id.startswith(DEFAULT_SCENE_PATH_PREFIX):
                     episode.scene_id = episode.scene_id[
                         len(DEFAULT_SCENE_PATH_PREFIX) :
                     ]
+                if episode.scene_id.startswith("hm3d"):
+                    episode.scene_id = "data/scene_datasets/"+episode.scene_id
 
                 episode.scene_id = os.path.join(scenes_dir, episode.scene_id)
 
