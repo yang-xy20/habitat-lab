@@ -21,7 +21,7 @@ from habitat.datasets import make_dataset
 from habitat.sims import make_sim
 from habitat.tasks import make_task
 from habitat.utils import profiling_wrapper
-
+from onpolicy.envs.habitat.utils import pose as pu
 
 class Env:
     r"""Fundamental environment class for :ref:`habitat`.
